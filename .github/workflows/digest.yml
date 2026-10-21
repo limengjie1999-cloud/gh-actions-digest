@@ -1,0 +1,50 @@
+name: Daily Actions digest
+
+on:
+  schedule:
+    # 13:00 UTC every day. GitHub starts scheduled workflows from the default
+    # branch and may delay the run when Actions is busy.
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+    inputs:
+      lookback-hours:
+        description: Hours of workflow runs to include
+        default: "24"
+        required: false
+      include-successes:
+        description: Include successful runs
+        type: boolean
+        default: false
+        required: false
+      max-items:
+        description: Maximum runs to list
+        default: "30"
+        required: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  digest:
+    name: Publish digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Summarize workflow runs
+        id: digest
+        uses: ./
+        with:
+          # workflow_dispatch inputs are unset for the daily schedule.
+          lookback-hours: ${{ inputs.lookback-hours || '24' }}
+          include-successes: ${{ inputs.include-successes == true && 'true' || 'false' }}
+          max-items: ${{ inputs.max-items || '30' }}
+
+      - name: Record counts in the log
+        run: |
+          echo "failure-count=${{ steps.digest.outputs.failure-count }}"
+          echo "attention-count=${{ steps.digest.outputs.attention-count }}"
+          echo "digest-path=${{ steps.digest.outputs.digest-path }}"
