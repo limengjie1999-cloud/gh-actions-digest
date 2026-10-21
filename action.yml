@@ -1,0 +1,132 @@
+name: Actions digest
+description: >-
+  Summarize recent GitHub Actions workflow runs for a repository and publish
+  a markdown digest to the job summary.
+author: limengjie1999-cloud
+
+branding:
+  icon: list
+  color: blue
+
+inputs:
+  lookback-hours:
+    description: Integer from 1 to 336. Include workflow runs created in the last N hours.
+    required: false
+    default: "24"
+  include-successes:
+    description: Boolean. List successful runs in addition to runs that need attention.
+    required: false
+    default: "false"
+  include-cancelled:
+    description: Boolean. List cancelled runs. Included runs count as needing attention.
+    required: false
+    default: "true"
+  include-timed-out:
+    description: Boolean. List timed-out runs. Included runs count as needing attention.
+    required: false
+    default: "true"
+  max-items:
+    description: >-
+      Integer from 1 to 100. Maximum number of runs to list. Summary counts
+      still include every matching run.
+    required: false
+    default: "30"
+  token:
+    description: >-
+      Token used to read Actions runs. Defaults to the job token. The token
+      needs actions:read, and actions:write when artifact upload is enabled.
+    required: false
+    default: ${{ github.token }}
+  repository:
+    description: Repository to summarize, as owner/name. Defaults to the calling repository.
+    required: false
+    default: ${{ github.repository }}
+  artifact:
+    description: Boolean. Upload the markdown digest as a workflow artifact.
+    required: false
+    default: "true"
+  artifact-name:
+    description: Artifact name used when artifact is true.
+    required: false
+    default: actions-digest
+  artifact-retention-days:
+    description: Integer. Days to keep the artifact. Use 0 for the repository default.
+    required: false
+    default: "14"
+  fail-on-failures:
+    description: >-
+      Boolean. Fail the step when the window contains a failure or
+      startup_failure. The digest is still written to the job summary.
+    required: false
+    default: "false"
+
+outputs:
+  failure-count:
+    description: Number of runs whose conclusion is failure.
+    value: ${{ steps.digest.outputs.failure-count }}
+  startup-failure-count:
+    description: Number of runs whose conclusion is startup_failure.
+    value: ${{ steps.digest.outputs.startup-failure-count }}
+  timed-out-count:
+    description: Number of timed-out runs included in the digest.
+    value: ${{ steps.digest.outputs.timed-out-count }}
+  cancelled-count:
+    description: Number of cancelled runs included in the digest.
+    value: ${{ steps.digest.outputs.cancelled-count }}
+  success-count:
+    description: Number of successful runs included in the digest.
+    value: ${{ steps.digest.outputs.success-count }}
+  attention-count:
+    description: >-
+      Runs that need attention: failures, startup failures, and included
+      timeouts and cancellations.
+    value: ${{ steps.digest.outputs.attention-count }}
+  has-failures:
+    description: true when failure-count or startup-failure-count is greater than zero.
+    value: ${{ steps.digest.outputs.has-failures }}
+  digest-path:
+    description: Workspace path of the markdown digest file.
+    value: ${{ steps.digest.outputs.digest-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Write Actions digest
+      id: digest
+      shell: bash
+      env:
+        INPUT_LOOKBACK_HOURS: ${{ inputs.lookback-hours }}
+        INPUT_INCLUDE_SUCCESSES: ${{ inputs.include-successes }}
+        INPUT_INCLUDE_CANCELLED: ${{ inputs.include-cancelled }}
+        INPUT_INCLUDE_TIMED_OUT: ${{ inputs.include-timed-out }}
+        INPUT_MAX_ITEMS: ${{ inputs.max-items }}
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_FAIL_ON_FAILURES: ${{ inputs.fail-on-failures }}
+        INPUT_SERVER_URL: ${{ github.server_url }}
+        INPUT_API_URL: ${{ github.api_url }}
+      run: |
+        set -euo pipefail
+        if command -v python3 >/dev/null 2>&1; then
+          PYTHON=python3
+        elif command -v python >/dev/null 2>&1; then
+          PYTHON=python
+        else
+          echo "::error::Python 3.9+ is required but was not found on this runner." >&2
+          exit 1
+        fi
+        if ! "$PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 9) else 1)'; then
+          echo "::error::Python 3.9+ is required." >&2
+          exit 1
+        fi
+        "$PYTHON" "$GITHUB_ACTION_PATH/scripts/digest.py"
+
+    - name: Upload digest artifact
+      if: ${{ inputs.artifact == 'true' && steps.digest.outputs.digest-path != '' && (success() || failure()) }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.digest.outputs.digest-path }}
+        retention-days: ${{ inputs.artifact-retention-days }}
+        if-no-files-found: error
+        include-hidden-files: true
